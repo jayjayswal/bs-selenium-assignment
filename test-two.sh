@@ -1,97 +1,54 @@
 #!/bin/bash
 
-AUTOMATE_USERNAME="jayjayswal_D9npvR"
-AUTOMATE_ACCESS_KEY="s9UoshQgmUN79dshsrLJ"
+IS_BROWSERSTACK_TEST=false
+IS_IP_FETCH_REQUIRED=false
+IS_PARALLEL_COUNT_FLAG=false
+TOTAL_PARALLEL_TESTS=1
 
-if [ -n "$1" ] && [ $1 == '--browserstack' ]; then
-    SELENIUM_SERVER_PATH="https://${AUTOMATE_USERNAME}:${AUTOMATE_ACCESS_KEY}@hub-cloud.browserstack.com"
-    SELENIUM_CAPABILITIES="{
-        \"desiredCapabilities\": {
-            \"browserName\" : \"chrome\",
-            \"os_version\" : \"Sierra\",
-            \"resolution\" : \"1920x1080\",
-            \"browser_version\" : \"65.0\",
-            \"os\" : \"OS X\",
-            \"name\" : \"Bstack - Selenium assignment phase 2\",
-            \"build\" : \"Bstack Selenium assignment build 1\"
-        }
-    }"
-    ELEMENT_ID_KEY="ELEMENT"
-else
-    SELENIUM_SERVER_PATH="http://localhost:4444"
-    SELENIUM_CAPABILITIES="{
-        \"desiredCapabilities\": {
-            \"browserName\" : \"chrome\"
-        }
-    }"
-    ELEMENT_ID_KEY="element-6066-11e4-a52e-4f735466cecf"
+parallel_count_arr=0
+arr_no=0
+for var in "$@"
+do
+    arr_no=$((arr_no+1))
+    case $var in
+        "--browserstack")
+            IS_BROWSERSTACK_TEST=true
+            ;;
+        "--ip-check")
+            IS_IP_FETCH_REQUIRED=true
+            ;;
+        "--parallel-threads")
+            parallel_count_arr=$((arr_no))
+            IS_PARALLEL_COUNT_FLAG=true
+            ;;
+    esac
+done
+
+echo $IS_BROWSERSTACK_TEST
+echo $IS_IP_FETCH_REQUIRED
+echo $IS_PARALLEL_COUNT_FLAG
+
+if [ "$IS_PARALLEL_COUNT_FLAG" = true ] ; then
+    re='^[1-9][0-9]+$'
+    arr_index=$(($parallel_count_arr+1))
+    temp=${!arr_index}
+    echo $temp
+    if ! [[ $temp =~ $re ]] ; then
+        TOTAL_PARALLEL_TESTS=1
+    else
+        TOTAL_PARALLEL_TESTS=$((temp))
+    fi
+fi
+params=""
+if [ "$IS_BROWSERSTACK_TEST" = true ] ; then
+    params+=" --browserstack"
+fi
+if [ "$IS_IP_FETCH_REQUIRED" = true ] ; then
+    params+=" --ip-check"
 fi
 
-IP_XPATH="/html/body/div[2]/div[2]/div/div/div/main/article/div[1]/div[1]/div[1]/div/div/ul/li[1]/a"
-
-CheckLastCommandStatus() {
-    retVal=$?
-    if [ $retVal -ne 0 ]; then
-        echo $1
-        exit $retVal
-    fi
-    if [ -n "$2" ]; then
-        status=$(echo $2 | jq -r '.status')
-        if [ $status -ne 0 ]; then
-            echo $2
-            exit 1
-        fi
-    fi
-}
-
-CheckPrerequisites() {
-    which jq &>/dev/null
-    CheckLastCommandStatus "'jq' is not installed, Please install and try again"
-}
-
-# checking prerequisites
-CheckPrerequisites
-# starting a session
-RES=$(curl -sS --location --request POST $SELENIUM_SERVER_PATH'/wd/hub/session' \
-    --header 'Content-Type: application/json' \
-    --data-raw "$SELENIUM_CAPABILITIES"
-    )
-CheckLastCommandStatus "Selenium failed to start session"
-SELENIUM_SESSION_ID=$(echo $RES | jq -r '.sessionId')
-# SELENIUM_SESSION_ID="c26992c29c2e81580e6d72f59ab84bb1"
-CheckLastCommandStatus "Selenium session id not found"
-echo "Selenium session ID:" $SELENIUM_SESSION_ID
-
-#opning google in
-RES=$(curl -sS --location --request POST $SELENIUM_SERVER_PATH'/wd/hub/session/'$SELENIUM_SESSION_ID'/url' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "url" : "https://www.whatismyip.com/"
-}')
-CheckLastCommandStatus "Cannot open whatismyipaddress.com in session" "$RES"
-
-#fetch ip text element
-RES=$(curl -sS --location --request POST $SELENIUM_SERVER_PATH'/wd/hub/session/'$SELENIUM_SESSION_ID'/element' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "using" : "xpath",
-    "value": "'$IP_XPATH'"
-}')
-CheckLastCommandStatus "Error in finding input element"
-IP_TEXT_ID=$(echo $RES | jq -r '.value | .["'$ELEMENT_ID_KEY'"]')
-CheckLastCommandStatus "Error in finding input element id"
-echo "ip text element ID:" $IP_TEXT_ID
-
-#fetch IP from site
-RES=$(curl -sS --location --request GET $SELENIUM_SERVER_PATH'/wd/hub/session/'$SELENIUM_SESSION_ID'/element/'$IP_TEXT_ID'/text')
-IP=$(echo $RES | jq -r '.value')
-CheckLastCommandStatus "Error in fetching IP"
-echo "IP address:" $IP
-
-echo "RTT:" 
-RES=$(time $(curl -sS -o /dev/null --location --request GET $SELENIUM_SERVER_PATH'/wd/hub/session/'$SELENIUM_SESSION_ID'/url'))
-
-#delete session
-RES=$(curl -sS --location --request DELETE $SELENIUM_SERVER_PATH'/wd/hub/session/'$SELENIUM_SESSION_ID'')
-CheckLastCommandStatus "Error while deleting session"
+for i in $(seq 1 $TOTAL_PARALLEL_TESTS); 
+do
+        bash find-ip-rtt.sh "TEST NO: $i" $params &
+done
 
